@@ -771,14 +771,14 @@ int main(int argc, const char **argv) {
 	conf.depfiles.reset(new list<string>());
 
 	XOPT_SIMPLE_PARSE(
-		"terrac",
+		argv[0],
 		XOPT_CTX_SLOPPYSHORTS,
 		&options[0], &conf,
 		argc, argv,
 		&extrac, &extrav,
 		&err,
 		stderr,
-		"terrac [-h] [--] file.t",
+		"[-h] [--] file.t",
 		"Unofficial Terra compiler",
 		nullptr,
 		14);

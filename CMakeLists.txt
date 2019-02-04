@@ -21,9 +21,19 @@ elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
 	message (FATAL_ERROR "MSVC not yet supported - add some build flags!")
 endif ()
 
+# Makes LuaJIT happy on MacOS
 add_executable (terrac main.cc)
 target_link_libraries (terrac
 	terra
 	z
 	curses
 	xopt)
+
+
+if (APPLE)
+	set_target_properties(terrac PROPERTIES
+		# Makes LuaJIT happy (otherwise luaL_newstate returns NULL). Has to be
+		# set as a property otherwise target_link_libraries thinks the arguments
+		# are libraries.
+		LINK_FLAGS "-pagezero_size 10000 -image_base 100000000")
+endif ()
