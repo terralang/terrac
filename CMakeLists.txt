@@ -29,7 +29,6 @@ target_link_libraries (terrac
 	curses
 	xopt)
 
-
 if (APPLE)
 	set_target_properties(terrac PROPERTIES
 		# Makes LuaJIT happy (otherwise luaL_newstate returns NULL). Has to be
