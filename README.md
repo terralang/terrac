@@ -1,6 +1,6 @@
 # terrac
 
-The unofficial Terra compiler.
+The unofficial [Terra](http://terralang.org/) compiler.
 
 ## Usage
 
