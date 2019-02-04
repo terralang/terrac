@@ -1,6 +1,0 @@
-[submodule "ext/filesystem"]
-	path = ext/filesystem
-	url = https://github.com/tidemmo/filesystem.git
-[submodule "ext/xopt"]
-	path = ext/xopt
-	url = https://github.com/tidemmo/xopt.git
