@@ -6,7 +6,7 @@ zlib = dependency('zlib')
 curses = dependency('curses')
 libterra = meson.get_compiler('c').find_library('terra')
 
-executable(
+exe = executable(
   'terrac',
   'main.cc',
   dependencies: [
