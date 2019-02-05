@@ -12,8 +12,8 @@
 
 #include <terra/terra.h>
 
-#include "ext/xopt/xopt.h"
-#include "ext/filesystem/filesystem.hpp"
+#include "xopt.h"
+#include "filesystem.hpp"
 
 using namespace std;
 

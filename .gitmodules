@@ -1,0 +1,6 @@
+[submodule "subprojects/xopt"]
+	path = subprojects/xopt
+	url = https://github.com/tidemmo/xopt.git
+[submodule "subprojects/filesystem"]
+	path = subprojects/filesystem
+	url = https://github.com/tidemmo/filesystem.git

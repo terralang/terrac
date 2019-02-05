@@ -1,12 +1,12 @@
 project (terrac)
 cmake_minimum_required (VERSION 3.2)
 
-add_subdirectory (ext/xopt)
+add_subdirectory (subprojects/xopt)
 
 include_directories (
 	/usr/local/include # for whatever reason, cmake doesn't include this as a default, nor does clang
-	ext/xopt
-	ext/filesystem)
+	subprojects/xopt
+	subprojects/filesystem)
 
 link_directories (
 	/usr/local/lib) # same thing here.
