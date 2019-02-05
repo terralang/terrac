@@ -4,4 +4,7 @@ jobs:
         machine: true
         steps:
             - checkout
+            - run:
+                  name: "Pull Submodules"
+                  command: git submodule update --init --recursive --depth=1
             - run: docker build -f .circleci/Dockerfile.test .
