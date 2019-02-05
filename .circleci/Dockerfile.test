@@ -1,6 +1,11 @@
-FROM alpine:3.7 AS base
+FROM ubuntu:19.04 AS base
 WORKDIR /src
-RUN apk --update add alpine-sdk python3 bash ninja
+RUN apt update -y
+RUN apt install -y python3-pip build-essential ninja-build libz-dev libncurses5-dev curl rsync unzip pkg-config
+ARG TERRA_ARCHIVE=release-2016-02-26/terra-Linux-x86_64-2fa8d0a
+RUN curl -Ls https://github.com/zdevito/terra/releases/download/${TERRA_ARCHIVE}.zip > $(basename ${TERRA_ARCHIVE}).zip
+RUN unzip $(basename ${TERRA_ARCHIVE}.zip)
+RUN rsync -rlp $(basename ${TERRA_ARCHIVE})/ /usr/local/
 RUN pip3 install --upgrade pip
 RUN pip3 install meson
 COPY . ./

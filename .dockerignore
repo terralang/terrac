@@ -1,0 +1,7 @@
+*.sw[a-p]
+/bin/
+/build/
+/.tup/
+/*.o
+/*.a
+/.git/
