@@ -319,12 +319,12 @@ static int on_loaded_newindex(lua_State *L) {
 	return 0;
 }
 
-static bool get_K(lua_State *L) {
+static bool get_terrac(lua_State *L) {
 	topcheck(L, 1);
 
-	lua_getglobal(L, "K");
+	lua_getglobal(L, "terrac");
 	if (lua_isnil(L, -1)) {
-		cerr << "terrac: ERROR: global `K` not found" << endl;
+		cerr << "terrac: ERROR: global `terrac` not found" << endl;
 		return false;
 	}
 
@@ -334,7 +334,7 @@ static bool get_K(lua_State *L) {
 static bool get_link_flags(lua_State *L) {
 	topcheck(L, 1);
 
-	if (!get_K(L)) {
+	if (!get_terrac(L)) {
 		return false;
 	}
 
@@ -345,7 +345,7 @@ static bool get_link_flags(lua_State *L) {
 		lua_pop(L, 1);
 		lua_newtable(L);
 	} else if (!lua_istable(L, -1)) {
-		cerr << "terrac: WARNING: K.link_flags is not nil and is not a table - replacing with empty table (must be table or nil)" << endl;
+		cerr << "terrac: WARNING: terrac.link_flags is not nil and is not a table - replacing with empty table (must be table or nil)" << endl;
 		lua_pop(L, 1);
 		lua_newtable(L);
 	}
@@ -356,7 +356,7 @@ static bool get_link_flags(lua_State *L) {
 static bool get_cflags(lua_State *L) {
 	topcheck(L, 1);
 
-	if (!get_K(L)) {
+	if (!get_terrac(L)) {
 		return false;
 	}
 
@@ -367,7 +367,7 @@ static bool get_cflags(lua_State *L) {
 		lua_pop(L, 1);
 		lua_newtable(L);
 	} else if (!lua_istable(L, -1)) {
-		cerr << "terrac: WARNING: K.c_flags is not nil and is not a table - replacing with empty table (must be table or nil)" << endl;
+		cerr << "terrac: WARNING: terrac.c_flags is not nil and is not a table - replacing with empty table (must be table or nil)" << endl;
 		lua_pop(L, 1);
 		lua_newtable(L);
 	}
@@ -620,7 +620,7 @@ int pmain(config &conf) {
 		lua_pop(L, 2);
 	}
 
-	// create K object
+	// create terrac object
 	{
 		topcheck(L);
 		lua_newtable(L);
@@ -628,7 +628,7 @@ int pmain(config &conf) {
 		lua_setfield(L, -2, "c_flags");
 		lua_newtable(L);
 		lua_setfield(L, -2, "link_flags");
-		lua_setglobal(L, "K");
+		lua_setglobal(L, "terrac");
 	}
 
 	// inject configuration
