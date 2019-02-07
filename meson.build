@@ -19,4 +19,6 @@ exe = executable(
     libterra,
     threads,
     dl
-  ])
+  ],
+  cpp_args: ['-Wall', '-Wextra', '-Werror'],
+  link_args: ['-pagezero_size', '10000', '-image_base', '100000000'])
