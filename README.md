@@ -35,7 +35,7 @@ $ make
 ```
 
 # License
-Terrac is [Unlicensed](http://unlicense.org/).
+Terra is licensed under the [MIT License](LICENSE)
 
 Terra is released under the MIT license.
 
