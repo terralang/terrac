@@ -483,7 +483,7 @@ static int table_assign(lua_State *L) {
 	if terra changes the prototype between the two, this will
 	have to be updated.
 */
-static int kterra_includec(lua_State *L) {
+static int terrac_includec(lua_State *L) {
 	luaL_checkstring(L, 1);
 
 	size_t nargs = lua_gettop(L);
@@ -559,13 +559,13 @@ static bool inject_includec(lua_State *L, config& conf) {
 	lua_getfield(L, -1, "includec");
 	assert(!lua_isnil(L, -1));
 	lua_pushlightuserdata(L, (void *) &conf);
-	lua_pushcclosure(L, &kterra_includec, 2);
+	lua_pushcclosure(L, &terrac_includec, 2);
 	lua_setfield(L, -2, "includec");
 
 	lua_getfield(L, -1, "includecstring");
 	assert(!lua_isnil(L, -1));
 	lua_pushlightuserdata(L, (void *) &conf);
-	lua_pushcclosure(L, &kterra_includec, 2);
+	lua_pushcclosure(L, &terrac_includec, 2);
 	lua_setfield(L, -2, "includecstring");
 
 	lua_pop(L, 1);
