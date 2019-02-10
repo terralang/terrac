@@ -24,31 +24,8 @@ Unofficial Terra compiler
 
 ## Building
 
-You need Meson, zLib (libz), libcurses, and Terra.
+You need CMake, zLib (libz), libcurses, and Terra.
 
-Further, clone recursively (or run `git submodule update --init --recursive`) or add
-as a submodule, making sure `terrac`'s sources are under `subprojects/terrac`.
-
-In your `meson.build`:
-```meson
-# XXX Proper generator can't be made by us _yet_ since there is a bug
-#     affecting path resolutions from within subprojects:
-#
-#     https://github.com/mesonbuild/meson/issues/4880
-#
-#     This means the code below is, well, untested and not official :c
-
-terrac_exe = subproject('terrac').get_variable('exe')
-terrac = generator(
-           terrac_exe,
-           depfile: '@PLAINNAME@.dep',
-           output: '@PLAINNAME@.o',
-           arguments: ['-o', '@OUTPUT@', '-D', '@DEPFILE@', '-P', '@BUILD_DIR@', '@INPUT@'])
-
-executable('my-app', terrac.process('app.t'))
-```
-
-Optionally, you can build with CMake, though this is considered deprecated.
 Building with CMake should be straightforward, but if you're new:
 
 ```console

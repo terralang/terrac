@@ -1,6 +1,6 @@
-[submodule "subprojects/xopt"]
-	path = subprojects/xopt
+[submodule "ext/xopt"]
+	path = ext/xopt
 	url = https://github.com/tidemmo/xopt.git
-[submodule "subprojects/filesystem"]
-	path = subprojects/filesystem
+[submodule "ext/filesystem"]
+	path = ext/filesystem
 	url = https://github.com/tidemmo/filesystem.git

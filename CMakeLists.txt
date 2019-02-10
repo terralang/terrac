@@ -1,12 +1,12 @@
 project (terrac)
 cmake_minimum_required (VERSION 3.2)
 
-add_subdirectory (subprojects/xopt)
+add_subdirectory (ext/xopt)
 
 include_directories (
 	/usr/local/include # for whatever reason, cmake doesn't include this as a default, nor does clang
-	subprojects/xopt
-	subprojects/filesystem)
+	ext/xopt
+	ext/filesystem)
 
 link_directories (
 	/usr/local/lib) # same thing here.
@@ -35,4 +35,6 @@ if (APPLE)
 		# set as a property otherwise target_link_libraries thinks the arguments
 		# are libraries.
 		LINK_FLAGS "-pagezero_size 10000 -image_base 100000000")
+elseif (UNIX)
+	target_link_libraries (terrac dl pthread)
 endif ()

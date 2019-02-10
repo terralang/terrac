@@ -1,14 +1,12 @@
 FROM ubuntu:19.04 AS base
 WORKDIR /src
-RUN apt update -y
-RUN apt install -y python3-pip build-essential ninja-build libz-dev libncurses5-dev curl rsync unzip pkg-config
+RUN apt update
+RUN apt install -y build-essential ninja-build libz-dev libncurses5-dev curl rsync unzip pkg-config cmake
 ARG TERRA_ARCHIVE=release-2016-02-26/terra-Linux-x86_64-2fa8d0a
 RUN curl -Ls https://github.com/zdevito/terra/releases/download/${TERRA_ARCHIVE}.zip > $(basename ${TERRA_ARCHIVE}).zip
 RUN unzip $(basename ${TERRA_ARCHIVE}.zip)
 RUN rsync -rlp $(basename ${TERRA_ARCHIVE})/ /usr/local/
-RUN pip3 install --upgrade pip
-RUN pip3 install meson
 COPY . ./
-RUN meson build
 WORKDIR /src/build
-RUN meson test
+RUN cmake .. -GNinja -DCMAKE_BUILD_TYPE=Debug
+RUN ninja
