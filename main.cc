@@ -165,23 +165,29 @@ static xoptOption options[] = {
 
 #ifdef NDEBUG
 #	define topcheck(...) ((void)0)
+#	define disarmtopcheck() ((void)0)
 #else
 struct _topcheck {
 	_topcheck(lua_State *_L, int ret = 0) : top(lua_gettop(_L)) {
+		this->armed = true;
 		this->L = _L;
 		this->ret = ret;
 	}
 
 	~_topcheck() {
-		assert(lua_gettop(this->L) == (this->top + this->ret));
+		if (armed) {
+			assert(lua_gettop(this->L) == (this->top + this->ret));
+		}
 	}
 
+	bool armed;
 	const int top;
 	int ret;
 	lua_State *L;
 };
 
 #	define topcheck(...) _topcheck __tc(__VA_ARGS__)
+#	define disarmtopcheck() __tc.armed = false
 #endif
 
 static int errfn_ref = -1;
@@ -408,6 +414,77 @@ static bool inject_link_flags(lua_State *L, config &conf) {
 	return true;
 }
 
+static int try_module_load(lua_State *L) {
+	topcheck(L, 1);
+	lua_getglobal(L, "terralib");
+	lua_getfield(L, -1, "loadmodule");
+	lua_remove(L, -2);
+	if (!lua_isfunction(L, -1)) {
+		lua_pop(L, 1);
+		disarmtopcheck();
+		luaL_error(L, "terralib.loadmodule is not a function");
+		return 0;
+	}
+	lua_pushvalue(L, 1); // the module being require()'d
+	lua_pushvalue(L, lua_upvalueindex(1)); // the origin filename
+	lua_pushvalue(L, lua_upvalueindex(2)); // the original (lua-provided) require()
+	lua_call(L, 3, 1);
+	return 1;
+}
+
+static int make_module_loader(lua_State *L) {
+	topcheck(L, 1);
+
+	if (string(lua_tostring(L, 2)) != "require") {
+		// fallback to regular index
+		lua_pushvalue(L, lua_upvalueindex(1));
+		lua_pushvalue(L, 1);
+		lua_pushvalue(L, 2);
+		lua_call(L, 2, 1);
+		return 1;
+	}
+
+	lua_Debug dbg;
+	assert(lua_getstack(L, 1, &dbg) == 1);
+	assert(lua_getinfo(L, "S", &dbg) != 0);
+
+	const char *source = dbg.source;
+	if (*source == '@') {
+		++source;
+	} else {
+		// @ signifies a module-loadable chunk.
+		// this chunk doesn't start with it,
+		// so give it the old require.
+		lua_pushvalue(L, lua_upvalueindex(2));
+		return 1;
+	}
+
+	lua_pushstring(L, source);
+	lua_pushvalue(L, lua_upvalueindex(2));
+	lua_pushcclosure(L, &try_module_load, 2);
+
+	return 1;
+}
+
+static void inject_require(lua_State *L) {
+	topcheck(L);
+
+	// let's tango.
+	//
+	// - push original _G.__index and _G.require as upvalues to make_module_loader
+	// - set make_module_loader as _G.__index
+	// - nil-out _G.require in order to start triggering new module loader
+	lua_getglobal(L, "_G");
+	lua_getmetatable(L, -1);
+	lua_getfield(L, -1, "__index");
+	lua_getfield(L, -2, "require");
+	lua_pushcclosure(L, &make_module_loader, 2);
+	lua_setfield(L, -2, "__index");
+	lua_pushnil(L);
+	lua_setfield(L, -3, "require");
+	lua_pop(L, 2);
+}
+
 /*
 static void print_table(lua_State *L, int t) {
 	topcheck(L);
@@ -618,6 +695,12 @@ int pmain(config &conf) {
 		lua_setfield(L, -2, "__newindex");
 		lua_setmetatable(L, -2);
 		lua_pop(L, 2);
+	}
+
+	// inject module loader
+	{
+		topcheck(L);
+		inject_require(L);
 	}
 
 	// create terrac object
