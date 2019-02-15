@@ -15,6 +15,12 @@
 #include "xopt.h"
 #include "filesystem.hpp"
 
+#ifdef _WIN32
+#	define TERRA_PATHSEP ';'
+#else
+#	define TERRA_PATHSEP ':'
+#endif
+
 using namespace std;
 
 // https://github.com/stevedonovan/Penlight/blob/d90956418cdf9e315719a7e4ce314db6b512ae00/lua/pl/compat.lua#L145-L155
@@ -414,6 +420,159 @@ static bool inject_link_flags(lua_State *L, config &conf) {
 	return true;
 }
 
+static filesystem::path mod_to_path(string mod) {
+	istringstream iss(mod);
+	filesystem::path result;
+	string leaf;
+	while (getline(iss, leaf, '.')) {
+		result.push_back(leaf);
+	}
+	return result;
+}
+
+static filesystem::path mod_to_relpath(string mod) {
+	assert(mod[0] == '.');
+
+	filesystem::path result;
+	size_t i = 0;
+	while (mod[i] == '.') {
+		result.push_back("..");
+		++i;
+	}
+
+	return (result / mod_to_path(mod.substr(i)));
+}
+
+static void pathenv_to_paths(string pathenv, vector<filesystem::path> &paths) {
+	istringstream iss(pathenv);
+	string path;
+	while (getline(iss, path, TERRA_PATHSEP)) {
+		paths.emplace_back(path);
+	}
+}
+
+static int terra_loadmodule(lua_State *L) {
+	/*
+		The only parameter that is required is
+		the first one - the module name. It must
+		also not be empty.
+
+		The second parameter - the origin file - is
+		only required if the module is a relative
+		path.
+
+		The third parameter - the original require()
+		function - is only used if passed and provides
+		a fallback mechanism for requiring files.
+	*/
+	string mod = luaL_checkstring(L, 1);
+	string origin = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+	stringstream reason;
+	char *terrapathenv;
+	vector<filesystem::path> terrapaths;
+	filesystem::path modpath;
+	filesystem::path trypath;
+
+	if (mod.empty()) {
+		luaL_error(L, "module path cannot be empty");
+		return 0; /* not hit */
+	}
+
+	// Fail fast: valid module paths are only [.a-z0-9_-]i
+	for (int i = 0, len = mod.length(); i < len; i++) {
+		char c = mod[i];
+		if (!(
+			(c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') ||
+			c == '.' || c == '_' || c == '-'))
+		{
+			reason << "\n\tnot a valid module string (contains invalid characters)";
+			goto fallback_loader;
+		}
+	}
+
+	if (mod[0] == '.') {
+		if (origin.empty()) {
+			reason << "\n\tmodule looked like a relative path but no origin was provided";
+			goto fallback_loader;
+		}
+
+		modpath = mod_to_relpath(mod);
+
+		trypath = (filesystem::path(origin) / modpath.with_extension(".t")).resolve(false);
+		if (trypath.exists()) {
+			modpath = trypath;
+			goto resolved;
+		}
+		reason << "\n\tno terra module '" << trypath << "'";
+
+		trypath = (filesystem::path(origin) / modpath / "init.t").resolve(false);
+		if (trypath.exists()) {
+			modpath = trypath;
+			goto resolved;
+		}
+		reason << "\n\tno terra module '" << trypath << "'";
+	} else {
+		// get the path
+		terrapathenv = getenv("TERRA_MODPATH");
+
+		if (terrapathenv == NULL) {
+			reason << "\n\tTERRA_MODPATH is empty";
+			goto fallback_loader;
+		}
+
+		modpath = mod_to_path(mod);
+		pathenv_to_paths(terrapathenv, terrapaths);
+
+		for (const auto &path : terrapaths) {
+			trypath = (path / modpath).with_extension(".t");
+			if (trypath.exists()) {
+				modpath = trypath;
+				goto resolved;
+			}
+			reason << "\n\tno terra module '" << trypath << "'";
+
+			trypath = path / modpath / "init.t";
+			if (trypath.exists()) {
+				modpath = trypath;
+				goto resolved;
+			}
+			reason << "\n\tno terra module '" << trypath << "'";
+		}
+	}
+
+fallback_loader:
+	if (lua_isfunction(L, 3)) {
+		// try to load it
+		lua_pushvalue(L, 3);
+		lua_pushvalue(L, 1);
+		if (lua_pcall(L, 1, 1, 0) != 0) {
+			// better error message opportunity here
+			luaL_error(L, "terra module '%s' not found:%s\ndefault loader also failed: %s",
+				lua_tostring(L, 1),
+				reason.str().c_str(),
+				lua_tostring(L, -1));
+			return 0; /* not hit */
+		}
+
+		return 1;
+	}
+
+	luaL_error(L, "could not find module '%s'");
+	return 0; /* not hit */
+
+resolved:
+	if (terra_loadfile(L, modpath.str().c_str())) {
+		luaL_error(L, "terra module '%s' could not be opened for reading",
+			modpath.str().c_str());
+		return 0; /* not hit */
+	}
+
+	lua_call(L, 0, 1);
+	return 1;
+}
+
 static int try_module_load(lua_State *L) {
 	topcheck(L, 1);
 	lua_getglobal(L, "terralib");
@@ -423,7 +582,7 @@ static int try_module_load(lua_State *L) {
 		lua_pop(L, 1);
 		disarmtopcheck();
 		luaL_error(L, "terralib.loadmodule is not a function");
-		return 0;
+		return 0; /* not hit */
 	}
 	lua_pushvalue(L, 1); // the module being require()'d
 	lua_pushvalue(L, lua_upvalueindex(1)); // the origin filename
@@ -477,12 +636,19 @@ static void inject_require(lua_State *L) {
 	lua_getglobal(L, "_G");
 	lua_getmetatable(L, -1);
 	lua_getfield(L, -1, "__index");
-	lua_getfield(L, -2, "require");
+	lua_getfield(L, -3, "require");
+	assert(!lua_isnil(L, -1));
 	lua_pushcclosure(L, &make_module_loader, 2);
 	lua_setfield(L, -2, "__index");
 	lua_pushnil(L);
 	lua_setfield(L, -3, "require");
 	lua_pop(L, 2);
+
+	// install the default module loader
+	lua_getglobal(L, "terralib");
+	lua_pushcfunction(L, &terra_loadmodule);
+	lua_setfield(L, -2, "loadmodule");
+	lua_pop(L, 1);
 }
 
 /*
@@ -839,6 +1005,7 @@ int main(int argc, const char **argv) {
 	const char *err = nullptr;
 	int extrac = 0;
 	const char **extrav = nullptr;
+	string absfilename;
 
 	config conf;
 	conf.help = false;
@@ -881,6 +1048,12 @@ int main(int argc, const char **argv) {
 	}
 
 	conf.filename = extrav[0];
+
+	// get absolute filename of input
+	// this is important since the module loader has to
+	// be able to navigate the filesystem efficiently.
+	absfilename = filesystem::path(conf.filename).resolve().str();
+	conf.filename = absfilename.c_str();
 
 error:
 	if (err) {
