@@ -489,6 +489,8 @@ static int terra_loadmodule(lua_State *L) {
 		function - is only used if passed and provides
 		a fallback mechanism for requiring files.
 	*/
+	config &conf = *((config *)lua_touserdata(L, lua_upvalueindex(1)));
+
 	string mod = luaL_checkstring(L, 1);
 	string origin = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 	stringstream reason;
@@ -583,6 +585,8 @@ fallback_loader:
 			return 0; /* not hit */
 		}
 
+		// success!
+		conf.depfiles->push_back(lua_tostring(L, 1));
 		return 1;
 	}
 
@@ -597,6 +601,9 @@ resolved:
 	}
 
 	lua_call(L, 0, 1);
+
+	// success!
+	conf.depfiles->push_back(modpath.str());
 	return 1;
 }
 
@@ -652,7 +659,7 @@ static int make_module_loader(lua_State *L) {
 	return 1;
 }
 
-static void inject_require(lua_State *L) {
+static void inject_mod_loader(lua_State *L, config &conf) {
 	topcheck(L);
 
 	// let's tango.
@@ -673,7 +680,8 @@ static void inject_require(lua_State *L) {
 
 	// install the default module loader
 	lua_getglobal(L, "terralib");
-	lua_pushcfunction(L, &terra_loadmodule);
+	lua_pushlightuserdata(L, &conf);
+	lua_pushcclosure(L, &terra_loadmodule, 1);
 	lua_setfield(L, -2, "loadmodule");
 	lua_pop(L, 1);
 }
@@ -919,7 +927,7 @@ int pmain(config &conf) {
 	// inject module loader
 	{
 		topcheck(L);
-		inject_require(L);
+		inject_mod_loader(L, conf);
 	}
 
 	// create terrac object
