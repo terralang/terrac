@@ -545,7 +545,7 @@ static int terra_loadmodule(lua_State *L) {
 		lua_pop(L, 2);
 
 		if (terramodpath.empty()) {
-			reason << "\n\tTERRA_MODPATH is empty";
+			reason << "\n\tterralib.modpath is empty";
 			goto fallback_loader;
 		}
 
