@@ -137,7 +137,7 @@ static xoptOption options[] = {
 		"Adds a module search path"
 	},
 	{
-		"nosysmods",
+		"nostdmod",
 		0,
 		offsetof(config, nosysmods),
 		0,
@@ -893,17 +893,25 @@ int pmain(config &conf) {
 	// inject module path
 	{
 		topcheck(L);
-		string modpath = conf.nosysmods ? "" : DEFAULT_MODPATH;
+		stringstream modpath;
+
 		char *terramodpath = getenv("TERRA_MODPATH");
 		if (terramodpath != NULL) {
-			if (conf.nosysmods) {
-				modpath = string(terramodpath);
-			} else {
-				modpath += TERRA_PATHSEP + string(terramodpath);
-			}
+			modpath << TERRA_PATHSEP << terramodpath;
 		}
+
+		for (const auto &mpath : *conf.modulepaths) {
+			modpath << TERRA_PATHSEP << mpath;
+		}
+
+		if (!conf.nosysmods) {
+			modpath << TERRA_PATHSEP << DEFAULT_MODPATH;
+		}
+
+		string modpaths = modpath.str().substr(1);
+
 		lua_getglobal(L, "terralib");
-		lua_pushstring(L, modpath.c_str());
+		lua_pushstring(L, modpaths.c_str());
 		lua_setfield(L, -2, "modpath");
 		lua_pop(L, 1);
 	}
