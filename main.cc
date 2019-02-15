@@ -23,6 +23,10 @@
 
 using namespace std;
 
+const char * const DEFAULT_MODPATH =
+	"/usr/share/terra/modules"
+	":/usr/local/share/terra/modules";
+
 // https://github.com/stevedonovan/Penlight/blob/d90956418cdf9e315719a7e4ce314db6b512ae00/lua/pl/compat.lua#L145-L155
 // MIT License
 // TODO convert to C
@@ -51,6 +55,8 @@ struct config {
 	unique_ptr<list<filesystem::path>> include_dirs;
 	unique_ptr<list<filesystem::path>> lib_dirs;
 	unique_ptr<list<string>> libs;
+	unique_ptr<list<filesystem::path>> modulepaths;
+	bool nosysmods;
 };
 
 static void on_verbose(const char *v, void *data, const struct xoptOption *option, bool longArg, const char **err) {
@@ -120,6 +126,24 @@ static xoptOption options[] = {
 		XOPT_TYPE_STRING,
 		"name",
 		"Specifies a library to be linked against the resulting binary"
+	},
+	{
+		"mod-dir",
+		'm',
+		offsetof(config, modulepaths),
+		&on_multi_path,
+		XOPT_TYPE_STRING,
+		"dir",
+		"Adds a module search path"
+	},
+	{
+		"nosysmods",
+		0,
+		offsetof(config, nosysmods),
+		0,
+		XOPT_TYPE_BOOL,
+		0,
+		"If specified, default system module paths are omitted from the modpath"
 	},
 	{
 		"depfile",
@@ -468,7 +492,7 @@ static int terra_loadmodule(lua_State *L) {
 	string mod = luaL_checkstring(L, 1);
 	string origin = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
 	stringstream reason;
-	char *terrapathenv;
+	string terramodpath;
 	vector<filesystem::path> terrapaths;
 	filesystem::path modpath;
 	filesystem::path trypath;
@@ -515,15 +539,18 @@ static int terra_loadmodule(lua_State *L) {
 		reason << "\n\tno terra module '" << trypath << "'";
 	} else {
 		// get the path
-		terrapathenv = getenv("TERRA_MODPATH");
+		lua_getglobal(L, "terralib");
+		lua_getfield(L, -1, "modpath");
+		terramodpath = lua_isnil(L, -1) ? "" : lua_tostring(L, -1);
+		lua_pop(L, 2);
 
-		if (terrapathenv == NULL) {
+		if (terramodpath.empty()) {
 			reason << "\n\tTERRA_MODPATH is empty";
 			goto fallback_loader;
 		}
 
 		modpath = mod_to_path(mod);
-		pathenv_to_paths(terrapathenv, terrapaths);
+		pathenv_to_paths(terramodpath, terrapaths);
 
 		for (const auto &path : terrapaths) {
 			trypath = (path / modpath).with_extension(".t");
@@ -863,6 +890,24 @@ int pmain(config &conf) {
 		lua_pop(L, 2);
 	}
 
+	// inject module path
+	{
+		topcheck(L);
+		string modpath = conf.nosysmods ? "" : DEFAULT_MODPATH;
+		char *terramodpath = getenv("TERRA_MODPATH");
+		if (terramodpath != NULL) {
+			if (conf.nosysmods) {
+				modpath = string(terramodpath);
+			} else {
+				modpath += TERRA_PATHSEP + string(terramodpath);
+			}
+		}
+		lua_getglobal(L, "terralib");
+		lua_pushstring(L, modpath.c_str());
+		lua_setfield(L, -2, "modpath");
+		lua_pop(L, 1);
+	}
+
 	// inject module loader
 	{
 		topcheck(L);
@@ -936,11 +981,11 @@ int pmain(config &conf) {
 		lua_getfield(L, -1, "saveobj");
 		assert(!lua_isnil(L, -1));
 
-		lua_pushstring(L, conf.output);            // 1
-		lua_pushvalue(L, -4);                      // 2
-		if (!get_link_flags(L)) return 1;          // 3
-		lua_pushnil(L);                            // 4
-		lua_pushboolean(L, (int) !conf.debug);     // 5
+		lua_pushstring(L, conf.output);
+		lua_pushvalue(L, -4);
+		if (!get_link_flags(L)) return 1;
+		lua_pushnil(L);
+		lua_pushboolean(L, (int) !conf.debug);
 
 		if (conf.verbosity > 0) {
 			cerr << "terrac: exporting public symbols to " << conf.output << endl;
