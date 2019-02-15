@@ -1064,6 +1064,8 @@ int main(int argc, const char **argv) {
 	conf.lib_dirs.reset(new list<filesystem::path>());
 	conf.libs.reset(new list<string>());
 	conf.depfiles.reset(new list<string>());
+	conf.modulepaths.reset(new list<filesystem::path>());
+	conf.nosysmods = false;
 
 	XOPT_SIMPLE_PARSE(
 		argv[0],
