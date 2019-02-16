@@ -595,8 +595,7 @@ fallback_loader:
 
 resolved:
 	if (terra_loadfile(L, modpath.str().c_str())) {
-		luaL_error(L, "terra module '%s' could not be opened for reading",
-			modpath.str().c_str());
+		lua_error(L);
 		return 0; /* not hit */
 	}
 
