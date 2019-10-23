@@ -37,6 +37,4 @@ $ make
 # License
 Terra is licensed under the [MIT License](LICENSE)
 
-Terra is released under the MIT license.
-
-Originally by Sir Toastie ([@qix-](https://github.com/qix-)) for the development of [Tide](https://reddit.com/r/tidemmo).
+Originally by Josh Junon ([@qix-](https://github.com/qix-)).
