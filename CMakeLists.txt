@@ -3,31 +3,34 @@ cmake_minimum_required (VERSION 3.2)
 
 add_subdirectory (ext/xopt)
 
-include_directories (
-	/usr/local/include # for whatever reason, cmake doesn't include this as a default, nor does clang
-	ext/xopt
-	ext/filesystem)
-
-link_directories (
-	/usr/local/lib) # same thing here.
-
-# Compilation flags
-if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang") OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
-	set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror -pedantic -std=c++11 -Wno-invalid-offsetof")
-	set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g3 -O0")
-	set (CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Ofast")
-elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
-	# TODO MSVC flags
-	message (FATAL_ERROR "MSVC not yet supported - add some build flags!")
+if (NOT DEFINED TERRA_PREFIX)
+	set (TERRA_PREFIX /usr/local)
 endif ()
 
 # Makes LuaJIT happy on MacOS
 add_executable (terrac main.cc)
-target_link_libraries (terrac
+target_link_libraries (terrac PRIVATE
 	terra
 	z
 	curses
 	xopt)
+
+target_compile_features (terrac PRIVATE cxx_std_17)
+
+target_include_directories (terrac PRIVATE
+	"${TERRA_PREFIX}/include"
+	ext/xopt)
+
+target_link_directories (terrac PRIVATE "${TERRA_PREFIX}/lib")
+
+if (("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang") OR ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"))
+	target_compile_options (terrac PRIVATE
+		-Wall -Wextra -Werror -pedantic -Wno-invalid-offsetof
+		$<$<CONFIG:Debug>:-g3 -O0>
+		$<$<CONFIG:Release>:-O3 -g0>)
+elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+	# TODO MSVC flags
+endif ()
 
 if (APPLE)
 	set_target_properties(terrac PROPERTIES
@@ -36,5 +39,5 @@ if (APPLE)
 		# are libraries.
 		LINK_FLAGS "-pagezero_size 10000 -image_base 100000000")
 elseif (UNIX)
-	target_link_libraries (terrac dl pthread)
+	target_link_libraries (terrac PRIVATE dl pthread)
 endif ()

@@ -9,11 +9,11 @@
 #include <memory>
 #include <string>
 #include <list>
+#include <filesystem>
 
 #include <terra/terra.h>
 
 #include "xopt.h"
-#include "filesystem.hpp"
 
 using namespace std;
 
@@ -391,7 +391,7 @@ static bool inject_link_flags(lua_State *L, config &conf) {
 		lua_settable(L, -3);
 
 		lua_pushinteger(L, ++n);
-		lua_pushstring(L, ip.str().c_str());
+		lua_pushstring(L, ip.c_str());
 		lua_settable(L, -3);
 	}
 
@@ -443,7 +443,7 @@ static bool inject_cflags(lua_State *L, config &conf) {
 		lua_settable(L, -3);
 
 		lua_pushinteger(L, ++n);
-		lua_pushstring(L, ip.str().c_str());
+		lua_pushstring(L, ip.c_str());
 		lua_settable(L, -3);
 	}
 
@@ -598,7 +598,6 @@ int pmain(config &conf) {
 	terra_Options topts;
 	topts.verbose = conf.verbosity == 0 ? 0 : conf.verbosity - 1;
 	topts.debug = (int) conf.debug;
-	topts.usemcjit = 0;
 
 	terra_initwithoptions(L, &topts);
 
@@ -724,19 +723,19 @@ int pmain(config &conf) {
 		}
 
 		if (conf.depfile_target) {
-			target = target.relative(conf.depfile_target);
+			target = filesystem::relative(target, conf.depfile_target);
 		}
 
-		df << target.str() << ":";
+		df << target.string() << ":";
 
 		for (const string &depstr : *conf.depfiles) {
 			filesystem::path dep(depstr);
 
 			if (conf.depfile_target) {
-				dep = dep.relative(conf.depfile_target);
+				dep = filesystem::relative(dep, conf.depfile_target);
 			}
 
-			df << " " << dep.str();
+			df << " " << dep.string();
 		}
 
 		df << endl;
@@ -808,11 +807,11 @@ error:
 
 	if (conf.verbosity > 0) {
 		for (const filesystem::path &p : *conf.include_dirs) {
-			cerr << "terrac: include dir: " << p.str() << endl;
+			cerr << "terrac: include dir: " << p << endl;
 		}
 
 		for (const filesystem::path &p : *conf.lib_dirs) {
-			cerr << "terrac: library search path: " << p.str() << endl;
+			cerr << "terrac: library search path: " << p << endl;
 		}
 	}
 
