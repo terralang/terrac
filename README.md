@@ -30,9 +30,12 @@ Building with CMake should be straightforward, but if you're new:
 
 ```console
 $ mkdir build && cd build
-$ cmake .. -DCMAKE_BUILD_TYPE=Debug
+$ cmake .. -DCMAKE_BUILD_TYPE=Debug -DTERRA_PREFIX=/path/to/terra
 $ make
 ```
+
+The `TERRA_PREFIX` path should be an absolute path to the root of an unpacked Terra release -
+i.e., the path `${TERRA_PREFIX}/{lib,include,bin}` should all exist.
 
 # License
 Terra is licensed under the [MIT License](LICENSE)
