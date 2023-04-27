@@ -15,7 +15,17 @@
 
 #include "xopt.h"
 
+#ifdef _WIN32
+#	define TERRA_PATHSEP ';'
+#else
+#	define TERRA_PATHSEP ':'
+#endif
+
 using namespace std;
+
+const char * const DEFAULT_MODPATH =
+	"/usr/share/terra/modules"
+	":/usr/local/share/terra/modules";
 
 // https://github.com/stevedonovan/Penlight/blob/d90956418cdf9e315719a7e4ce314db6b512ae00/lua/pl/compat.lua#L145-L155
 // MIT License
@@ -45,6 +55,8 @@ struct config {
 	unique_ptr<list<filesystem::path>> include_dirs;
 	unique_ptr<list<filesystem::path>> lib_dirs;
 	unique_ptr<list<string>> libs;
+	unique_ptr<list<filesystem::path>> modulepaths;
+	bool nosysmods;
 };
 
 static void on_verbose(const char *v, void *data, const struct xoptOption *option, bool longArg, const char **err) {
@@ -116,6 +128,24 @@ static xoptOption options[] = {
 		"Specifies a library to be linked against the resulting binary"
 	},
 	{
+		"mod-dir",
+		'm',
+		offsetof(config, modulepaths),
+		&on_multi_path,
+		XOPT_TYPE_STRING,
+		"dir",
+		"Adds a module search path"
+	},
+	{
+		"nostdmod",
+		0,
+		offsetof(config, nosysmods),
+		0,
+		XOPT_TYPE_BOOL,
+		0,
+		"If specified, default system module paths are omitted from the modpath"
+	},
+	{
 		"depfile",
 		'D',
 		offsetof(config, depfile),
@@ -165,23 +195,29 @@ static xoptOption options[] = {
 
 #ifdef NDEBUG
 #	define topcheck(...) ((void)0)
+#	define disarmtopcheck() ((void)0)
 #else
 struct _topcheck {
 	_topcheck(lua_State *_L, int ret = 0) : top(lua_gettop(_L)) {
+		this->armed = true;
 		this->L = _L;
 		this->ret = ret;
 	}
 
 	~_topcheck() {
-		assert(lua_gettop(this->L) == (this->top + this->ret));
+		if (armed) {
+			assert(lua_gettop(this->L) == (this->top + this->ret));
+		}
 	}
 
+	bool armed;
 	const int top;
 	int ret;
 	lua_State *L;
 };
 
 #	define topcheck(...) _topcheck __tc(__VA_ARGS__)
+#	define disarmtopcheck() __tc.armed = false
 #endif
 
 static int errfn_ref = -1;
@@ -408,6 +444,247 @@ static bool inject_link_flags(lua_State *L, config &conf) {
 	return true;
 }
 
+static filesystem::path mod_to_path(string mod) {
+	istringstream iss(mod);
+	filesystem::path result;
+	string leaf;
+	while (getline(iss, leaf, '.')) {
+		result.push_back(leaf);
+	}
+	return result;
+}
+
+static filesystem::path mod_to_relpath(string mod) {
+	assert(mod[0] == '.');
+
+	filesystem::path result;
+	size_t i = 0;
+	while (mod[i] == '.') {
+		result.push_back("..");
+		++i;
+	}
+
+	return (result / mod_to_path(mod.substr(i)));
+}
+
+static void pathenv_to_paths(string pathenv, vector<filesystem::path> &paths) {
+	istringstream iss(pathenv);
+	string path;
+	while (getline(iss, path, TERRA_PATHSEP)) {
+		paths.emplace_back(path);
+	}
+}
+
+static int terra_loadmodule(lua_State *L) {
+	/*
+		The only parameter that is required is
+		the first one - the module name. It must
+		also not be empty.
+
+		The second parameter - the origin file - is
+		only required if the module is a relative
+		path.
+
+		The third parameter - the original require()
+		function - is only used if passed and provides
+		a fallback mechanism for requiring files.
+	*/
+	config &conf = *((config *)lua_touserdata(L, lua_upvalueindex(1)));
+
+	string mod = luaL_checkstring(L, 1);
+	string origin = lua_isstring(L, 2) ? lua_tostring(L, 2) : "";
+	stringstream reason;
+	string terramodpath;
+	vector<filesystem::path> terrapaths;
+	filesystem::path modpath;
+	filesystem::path trypath;
+
+	if (mod.empty()) {
+		luaL_error(L, "module path cannot be empty");
+		return 0; /* not hit */
+	}
+
+	// Fail fast: valid module paths are only [.a-z0-9_-]i
+	for (int i = 0, len = mod.length(); i < len; i++) {
+		char c = mod[i];
+		if (!(
+			(c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') ||
+			c == '.' || c == '_' || c == '-'))
+		{
+			reason << "\n\tnot a valid module string (contains invalid characters)";
+			goto fallback_loader;
+		}
+	}
+
+	if (mod[0] == '.') {
+		if (origin.empty()) {
+			reason << "\n\tmodule looked like a relative path but no origin was provided";
+			goto fallback_loader;
+		}
+
+		modpath = mod_to_relpath(mod);
+
+		trypath = (filesystem::path(origin) / modpath.with_extension(".t")).resolve(false);
+		if (trypath.exists()) {
+			modpath = trypath;
+			goto resolved;
+		}
+		reason << "\n\tno terra module '" << trypath << "'";
+
+		trypath = (filesystem::path(origin) / modpath / "init.t").resolve(false);
+		if (trypath.exists()) {
+			modpath = trypath;
+			goto resolved;
+		}
+		reason << "\n\tno terra module '" << trypath << "'";
+	} else {
+		// get the path
+		lua_getglobal(L, "terralib");
+		lua_getfield(L, -1, "modpath");
+		terramodpath = lua_isnil(L, -1) ? "" : lua_tostring(L, -1);
+		lua_pop(L, 2);
+
+		if (terramodpath.empty()) {
+			reason << "\n\tterralib.modpath is empty";
+			goto fallback_loader;
+		}
+
+		modpath = mod_to_path(mod);
+		pathenv_to_paths(terramodpath, terrapaths);
+
+		for (const auto &path : terrapaths) {
+			trypath = (path / modpath).with_extension(".t");
+			if (trypath.exists()) {
+				modpath = trypath;
+				goto resolved;
+			}
+			reason << "\n\tno terra module '" << trypath << "'";
+
+			trypath = path / modpath / "init.t";
+			if (trypath.exists()) {
+				modpath = trypath;
+				goto resolved;
+			}
+			reason << "\n\tno terra module '" << trypath << "'";
+		}
+	}
+
+fallback_loader:
+	if (lua_isfunction(L, 3)) {
+		// try to load it
+		lua_pushvalue(L, 3);
+		lua_pushvalue(L, 1);
+		if (lua_pcall(L, 1, 1, 0) != 0) {
+			// better error message opportunity here
+			luaL_error(L, "terra module '%s' not found:%s\ndefault loader also failed: %s",
+				lua_tostring(L, 1),
+				reason.str().c_str(),
+				lua_tostring(L, -1));
+			return 0; /* not hit */
+		}
+
+		// success!
+		conf.depfiles->push_back(lua_tostring(L, 1));
+		return 1;
+	}
+
+	luaL_error(L, "could not find module '%s'");
+	return 0; /* not hit */
+
+resolved:
+	if (terra_loadfile(L, modpath.str().c_str())) {
+		lua_error(L);
+		return 0; /* not hit */
+	}
+
+	lua_call(L, 0, 1);
+
+	// success!
+	conf.depfiles->push_back(modpath.str());
+	return 1;
+}
+
+static int try_module_load(lua_State *L) {
+	topcheck(L, 1);
+	lua_getglobal(L, "terralib");
+	lua_getfield(L, -1, "loadmodule");
+	lua_remove(L, -2);
+	if (!lua_isfunction(L, -1)) {
+		lua_pop(L, 1);
+		disarmtopcheck();
+		luaL_error(L, "terralib.loadmodule is not a function");
+		return 0; /* not hit */
+	}
+	lua_pushvalue(L, 1); // the module being require()'d
+	lua_pushvalue(L, lua_upvalueindex(1)); // the origin filename
+	lua_pushvalue(L, lua_upvalueindex(2)); // the original (lua-provided) require()
+	lua_call(L, 3, 1);
+	return 1;
+}
+
+static int make_module_loader(lua_State *L) {
+	topcheck(L, 1);
+
+	if (string(lua_tostring(L, 2)) != "require") {
+		// fallback to regular index
+		lua_pushvalue(L, lua_upvalueindex(1));
+		lua_pushvalue(L, 1);
+		lua_pushvalue(L, 2);
+		lua_call(L, 2, 1);
+		return 1;
+	}
+
+	lua_Debug dbg;
+	assert(lua_getstack(L, 1, &dbg) == 1);
+	assert(lua_getinfo(L, "S", &dbg) != 0);
+
+	const char *source = dbg.source;
+	if (*source == '@') {
+		++source;
+	} else {
+		// @ signifies a module-loadable chunk.
+		// this chunk doesn't start with it,
+		// so give it the old require.
+		lua_pushvalue(L, lua_upvalueindex(2));
+		return 1;
+	}
+
+	lua_pushstring(L, source);
+	lua_pushvalue(L, lua_upvalueindex(2));
+	lua_pushcclosure(L, &try_module_load, 2);
+
+	return 1;
+}
+
+static void inject_mod_loader(lua_State *L, config &conf) {
+	topcheck(L);
+
+	// let's tango.
+	//
+	// - push original _G.__index and _G.require as upvalues to make_module_loader
+	// - set make_module_loader as _G.__index
+	// - nil-out _G.require in order to start triggering new module loader
+	lua_getglobal(L, "_G");
+	lua_getmetatable(L, -1);
+	lua_getfield(L, -1, "__index");
+	lua_getfield(L, -3, "require");
+	assert(!lua_isnil(L, -1));
+	lua_pushcclosure(L, &make_module_loader, 2);
+	lua_setfield(L, -2, "__index");
+	lua_pushnil(L);
+	lua_setfield(L, -3, "require");
+	lua_pop(L, 2);
+
+	// install the default module loader
+	lua_getglobal(L, "terralib");
+	lua_pushlightuserdata(L, &conf);
+	lua_pushcclosure(L, &terra_loadmodule, 1);
+	lua_setfield(L, -2, "loadmodule");
+	lua_pop(L, 1);
+}
+
 /*
 static void print_table(lua_State *L, int t) {
 	topcheck(L);
@@ -619,6 +896,38 @@ int pmain(config &conf) {
 		lua_pop(L, 2);
 	}
 
+	// inject module path
+	{
+		topcheck(L);
+		stringstream modpath;
+
+		char *terramodpath = getenv("TERRA_MODPATH");
+		if (terramodpath != NULL) {
+			modpath << TERRA_PATHSEP << terramodpath;
+		}
+
+		for (const auto &mpath : *conf.modulepaths) {
+			modpath << TERRA_PATHSEP << mpath;
+		}
+
+		if (!conf.nosysmods) {
+			modpath << TERRA_PATHSEP << DEFAULT_MODPATH;
+		}
+
+		string modpaths = modpath.str().substr(1);
+
+		lua_getglobal(L, "terralib");
+		lua_pushstring(L, modpaths.c_str());
+		lua_setfield(L, -2, "modpath");
+		lua_pop(L, 1);
+	}
+
+	// inject module loader
+	{
+		topcheck(L);
+		inject_mod_loader(L, conf);
+	}
+
 	// create terrac object
 	{
 		topcheck(L);
@@ -686,11 +995,11 @@ int pmain(config &conf) {
 		lua_getfield(L, -1, "saveobj");
 		assert(!lua_isnil(L, -1));
 
-		lua_pushstring(L, conf.output);            // 1
-		lua_pushvalue(L, -4);                      // 2
-		if (!get_link_flags(L)) return 1;          // 3
-		lua_pushnil(L);                            // 4
-		lua_pushboolean(L, (int) !conf.debug);     // 5
+		lua_pushstring(L, conf.output);
+		lua_pushvalue(L, -4);
+		if (!get_link_flags(L)) return 1;
+		lua_pushnil(L);
+		lua_pushboolean(L, (int) !conf.debug);
 
 		if (conf.verbosity > 0) {
 			cerr << "terrac: exporting public symbols to " << conf.output << endl;
@@ -755,6 +1064,7 @@ int main(int argc, const char **argv) {
 	const char *err = nullptr;
 	int extrac = 0;
 	const char **extrav = nullptr;
+	string absfilename;
 
 	config conf;
 	conf.help = false;
@@ -768,6 +1078,8 @@ int main(int argc, const char **argv) {
 	conf.lib_dirs.reset(new list<filesystem::path>());
 	conf.libs.reset(new list<string>());
 	conf.depfiles.reset(new list<string>());
+	conf.modulepaths.reset(new list<filesystem::path>());
+	conf.nosysmods = false;
 
 	XOPT_SIMPLE_PARSE(
 		argv[0],
@@ -797,6 +1109,12 @@ int main(int argc, const char **argv) {
 	}
 
 	conf.filename = extrav[0];
+
+	// get absolute filename of input
+	// this is important since the module loader has to
+	// be able to navigate the filesystem efficiently.
+	absfilename = filesystem::path(conf.filename).resolve().str();
+	conf.filename = absfilename.c_str();
 
 error:
 	if (err) {
